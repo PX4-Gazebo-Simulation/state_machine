@@ -162,7 +162,7 @@ int main(int argc, char **argv)
 
 	setpoint_H.pose.position.x = 0.0f;	/* pose(x,y) is not used, just for safe. -libn */
 	setpoint_H.pose.position.y = 0.0f;
-	setpoint_H.pose.position.z = 3.0f;
+	setpoint_H.pose.position.z = 5.0f;
 
     //send a few setpoints before starting
     for(int i = 100; ros::ok() && i > 0; --i){
