@@ -37,7 +37,7 @@ int main(int argc, char **argv)
 //        setpoint_indexed.z = 2.5f;
 		setpoint_indexed.x = 0.0f;
 		setpoint_indexed.y = 5.0f;	/* ROS coordinate frame: NWU(North/West/Up) -libn */
-		setpoint_indexed.z = 5.0f;
+		setpoint_indexed.z = 3.0f;
 		setpoint_indexed_pub.publish(setpoint_indexed);
 		ros::spinOnce();
 		loop_rate.sleep();
