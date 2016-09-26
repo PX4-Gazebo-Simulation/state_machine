@@ -411,7 +411,7 @@ void state_machine_func(void)
         	}
             break;
         case mission_point_A:
-        	if(loop > 5)
+        	if(loop > 2)
 			{
 				current_mission_state = mission_stop; // current_mission_state++;
 				break;
@@ -557,7 +557,7 @@ void state_machine_func(void)
         		/* TODO: stop spraying. -libn */
 
             	loop++;	/* switch to next loop. -libn */
-            	if(loop > 5)
+            	if(loop > 2)
             	{
             		current_mission_state = mission_stop; // current_mission_state++;
             	}
