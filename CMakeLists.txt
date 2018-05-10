@@ -20,6 +20,10 @@ add_message_files(
   DrawingBoard.msg
   DrawingBoard10.msg
   ActuatorControl.msg
+  Thrust.msg
+  AttitudeTarget.msg
+
+  Key.msg
 
 )
 

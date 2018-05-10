@@ -9,14 +9,25 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TwistStamped.h>			/* local velocity setpoint. -libn */
 #include <state_machine/CommandBool.h>
-#include <state_machine/SetMode.h>
+// #include <state_machine/SetMode.h>
 #include <state_machine/State.h>
 #include <state_machine/CommandTOL.h>
 #include <state_machine/Setpoint.h>
 #include <state_machine/DrawingBoard10.h>
 
+#include <state_machine/Thrust.h>
+#include <state_machine/AttitudeTarget.h>
+
+#include <state_machine/Key.h>
+
 /* subscribe messages from pixhawk. -libn */
-#include <state_machine/TASK_STATUS_CHANGE_P2M.h>
+// #include <state_machine/TASK_STATUS_CHANGE_P2M.h>
+
+// attitude control:
+state_machine::AttitudeTarget att_pub;	/* attitude setpoint to be published. -libn */
+float theta = 0.0f;						/* attitude: rotation angle. -libn */
+float x_axis,y_axis,z_axis;
+
 
 void state_machine_func(void);
 /* mission state. -libn */
@@ -44,8 +55,6 @@ bool relocate_valid = false;	/* to complete relocate mission. -libn */
 int mission_failure = 0;
 
 int current_mission_num;	/* mission num: 5 subtask -> 5 current nums.	TODO:change mission num. -libn */
-
-bool velocity_control_enable = false;
 
 ros::Time mission_timer_t;	/* timer to control the whole mission. -libn */
 ros::Time loop_timer_t;	/* timer to control subtask. -libn */
@@ -80,6 +89,76 @@ void board_pos_cb(const state_machine::DrawingBoard10::ConstPtr& msg)
 	board10 = *msg;
 }
 
+/* keyboard. -libn */
+state_machine::Key key;
+void keyboard_cb(const state_machine::Key::ConstPtr& msg)
+{
+	key = *msg;
+	if(key.code == 276 || key.code == 275)
+	{
+		if(x_axis != 1.0f)
+		{
+			theta = 0.0f;
+		}
+		x_axis = 1.0f;
+		y_axis = 0.0f;
+		z_axis = 0.0f;
+		ROS_INFO("Rotate along x_axis!");
+	}
+	if(key.code == 273 || key.code == 274)
+	{
+		if(y_axis != 1.0f)
+		{
+			theta = 0.0f;
+		}
+		x_axis = 0.0f;
+		y_axis = 1.0f;
+		z_axis = 0.0f;
+		ROS_INFO("Rotate along y_axis!");
+	}
+	if(key.code == 97 || key.code == 100)
+	{
+		if(z_axis != 1.0f)
+		{
+			theta = 0.0f;
+		}
+		x_axis = 0.0f;
+		y_axis = 0.0f;
+		z_axis = 1.0f;
+		ROS_INFO("Rotate along z_axis!");
+	}
+
+	if(key.code == 273 || key.code == 276 || key.code == 97)
+	{
+		theta += 0.1f;
+	}
+	if(key.code == 274 || key.code == 275 || key.code == 100)
+	{
+		theta -= 0.1f;
+	}
+	// thrust:
+	if(key.code == 119)
+	{
+		att_pub.thrust += 0.03f;
+		ROS_INFO("Thrust: %f",att_pub.thrust);
+	}
+	if(key.code == 115)
+	{
+		att_pub.thrust -= 0.03f;
+		ROS_INFO("Thrust: %f",att_pub.thrust);
+	}
+	ROS_INFO("Rotate angle: theta = %f",theta);
+
+	// attitude control:
+	att_pub.orientation.x = x_axis*sinf(theta/2);			/* orientation expressed using quaternion. -libn */
+	att_pub.orientation.y = y_axis*sinf(theta/2);			/* w = cos(theta/2), x = nx * sin(theta/2),  y = ny * sin(theta/2), z = nz * sin(theta/2) -libn */
+	att_pub.orientation.z = z_axis*sinf(theta/2);
+	att_pub.orientation.w = cosf(theta/2);		/* set yaw* = 90 degree(default in simulation). -libn */
+
+
+	// ROS_INFO("key = %d",key.code);
+}
+
 /* 4 setpoints. -libn */
 geometry_msgs::PoseStamped setpoint_A;
 geometry_msgs::PoseStamped setpoint_B;
@@ -89,17 +168,23 @@ geometry_msgs::PoseStamped setpoint_H;	/* home position. -libn */
 
 geometry_msgs::PoseStamped pose_pub;
 geometry_msgs::TwistStamped vel_pub;	/* velocity setpoint to be published. -libn */
+geometry_msgs::TwistStamped attitude_pub; /* attitude setpoint to be published. -libn */
+state_machine::Thrust thrust_pub;	/* thrust setpoint to be published. -libn */
 
-state_machine::TASK_STATUS_CHANGE_P2M task_status_change_p2m_data;
-void task_status_change_p2m_cb(const state_machine::TASK_STATUS_CHANGE_P2M::ConstPtr& msg){
-	task_status_change_p2m_data = *msg;
 
-	ROS_INFO("subscribing task_status_change_p2m: %5.3f %d %d",
-				task_status_change_p2m_data.spray_duration,
-				task_status_change_p2m_data.task_status,
-				task_status_change_p2m_data.loop_value);
 
-}
+// state_machine::TASK_STATUS_CHANGE_P2M task_status_change_p2m_data;
+// void task_status_change_p2m_cb(const state_machine::TASK_STATUS_CHANGE_P2M::ConstPtr& msg){
+// 	task_status_change_p2m_data = *msg;
+
+// 	ROS_INFO("subscribing task_status_change_p2m: %5.3f %d %d",
+// 				task_status_change_p2m_data.spray_duration,
+// 				task_status_change_p2m_data.task_status,
+// 				task_status_change_p2m_data.loop_value);
+
+// }
+
+state_machine::Key k;
 
 int main(int argc, char **argv)
 {
@@ -115,10 +200,23 @@ int main(int argc, char **argv)
     ros::Publisher local_vel_pub = nh.advertise<geometry_msgs::TwistStamped>
                 ("/mavros/setpoint_velocity/cmd_vel", 10);
 
+    /* Attitude setpoint. -libn */
+    ros::Publisher local_attitude_pub = nh.advertise<geometry_msgs::TwistStamped>
+                ("/mavros/setpoint_attitude/cmd_vel", 10);
+
+    /* Thrust setpoint. -libn */
+    ros::Publisher local_thrust_pub = nh.advertise<state_machine::Thrust>
+                ("/mavros/setpoint_attitude/thrust", 10);	
+
+    /* ATT setpoint. -libn */
+    ros::Publisher local_att_pub = nh.advertise<state_machine::AttitudeTarget>
+                ("/mavros/setpoint_raw/attitude", 10);											
+
+
     ros::ServiceClient arming_client = nh.serviceClient<state_machine::CommandBool>
             ("mavros/cmd/arming");
-    ros::ServiceClient set_mode_client = nh.serviceClient<state_machine::SetMode>
-            ("mavros/set_mode");
+    // ros::ServiceClient set_mode_client = nh.serviceClient<state_machine::SetMode>
+    //         ("mavros/set_mode");
 
     // takeoff and land service
     // ros::ServiceClient takeoff_client = nh.serviceClient<mavros_msgs::CommandTOL>("mavros/cmd/takeoff");
@@ -135,6 +233,9 @@ int main(int argc, char **argv)
 		            ("DrawingBoard_Position10", 10, board_pos_cb);
 	board10.drawingboard.resize(10);		/* MUST! -libn */
 
+	ros::Subscriber keyboard_sub = nh.subscribe<state_machine::Key>
+		("keyboard/keydown", 10, keyboard_cb);
+
     //the setpoint publishing rate MUST be faster than 2Hz
     ros::Rate rate(10.0);
 
@@ -146,7 +247,7 @@ int main(int argc, char **argv)
 
     pose_pub.pose.position.x = 0;
     pose_pub.pose.position.y = 0;
-    pose_pub.pose.position.z = 2;
+    pose_pub.pose.position.z = 1;
     pose_pub.pose.orientation.x = 0;			/* orientation expressed using quaternion. -libn */
 	pose_pub.pose.orientation.y = 0;			/* w = cos(theta/2), x = nx * sin(theta/2),  y = ny * sin(theta/2), z = nz * sin(theta/2) -libn */
 	pose_pub.pose.orientation.z = 0.707;
@@ -154,7 +255,7 @@ int main(int argc, char **argv)
 
 	setpoint_H.pose.position.x = 0.0f;	/* pose(x,y) is not used, just for safe. -libn */
 	setpoint_H.pose.position.y = 0.0f;
-	setpoint_H.pose.position.z = 3.0f;
+	setpoint_H.pose.position.z = 5.0f;
 
     //send a few setpoints before starting
     for(int i = 100; ros::ok() && i > 0; --i){
@@ -176,7 +277,30 @@ int main(int argc, char **argv)
     ROS_INFO("current_state.mode = %s",current_state.mode.c_str());
     ROS_INFO("armed status: %d",current_state.armed);
 
-	velocity_control_enable = true;
+	bool velocity_control_enable = true;
+	bool pos_control_enable = false;
+	bool att_control_enable = false;
+
+
+	// velocity control:
+	vel_pub.twist.linear.x = 0.0f;
+	vel_pub.twist.linear.y = 0.0f;
+	vel_pub.twist.linear.z = 2.0f;
+	vel_pub.twist.angular.x = 0.0f;
+	vel_pub.twist.angular.y = 0.0f;
+	vel_pub.twist.angular.z = 0.0f;
+
+	// position control:
+	pose_pub.pose.position.x = 5;
+	pose_pub.pose.position.y = 5;
+	pose_pub.pose.position.z = 2;
+
+	// attitude control:
+	att_pub.thrust = 0.56f;
+	att_pub.orientation.x = x_axis*sinf(theta/2);			/* orientation expressed using quaternion. -libn */
+	att_pub.orientation.y = y_axis*sinf(theta/2);			/* w = cos(theta/2), x = nx * sin(theta/2),  y = ny * sin(theta/2), z = nz * sin(theta/2) -libn */
+	att_pub.orientation.z = z_axis*sinf(theta/2);
+	att_pub.orientation.w = cosf(theta/2);		/* set yaw* = 90 degree(default in simulation). -libn */
 
     while(ros::ok()){
     	/* mode switch display(Once). -libn */
@@ -224,35 +348,39 @@ int main(int argc, char **argv)
 		// ROS_INFO("current quaternion: %f %f %f %f",current_pos.pose.orientation.x,current_pos.pose.orientation.y,
 		// current_pos.pose.orientation.z,current_pos.pose.orientation.w);
 
+		// attitude_pub.twist.linear.x = 0.15;
+		// attitude_pub.twist.linear.y = 0.15;
+		// attitude_pub.twist.linear.z = 0.15;
+		// attitude_pub.twist.angular.x = 0.0f;
+		// attitude_pub.twist.angular.y = 0.0f;
+		// attitude_pub.twist.angular.z = 0.0f;
+
+		// thrust_pub.thrust = 100.0f;
+
+		// att_pub.body_rate.x = 90.0f;
+		// att_pub.body_rate.y = 0.0f;
+		// att_pub.body_rate.z = 0.0f;
+
+
+
+
+
 
 		// if(current_state.mode == "OFFBOARD" && current_state.armed)	/* set message display delay(0.5s). -libn */
 		if(current_state.mode == "OFFBOARD" && current_state.armed)	/* set message display delay(0.5s). -libn */
 		{
 
-
-			//////////////////////////////////////////////////////////////////
-			vel_pub.twist.linear.x = 0.0f;
-			vel_pub.twist.linear.y = 0.0f;
-			vel_pub.twist.linear.z = 2.0f;
-			vel_pub.twist.angular.x = 0.0f;
-			vel_pub.twist.angular.y = 0.0f;
-			vel_pub.twist.angular.z = 0.0f;
-
-			pose_pub.pose.position.x = 5;
-			pose_pub.pose.position.y = 5;
-			pose_pub.pose.position.z = 2;
 			
-			
-			
-			if((abs(current_pos.pose.position.x - current_pos.pose.position.x) < 0.2) &&      // switch to next state
+			if(velocity_control_enable &&
+			   (abs(current_pos.pose.position.x - current_pos.pose.position.x) < 0.2) &&      // switch to next state
 			   (abs(current_pos.pose.position.y - current_pos.pose.position.y) < 0.2) &&
 			   (abs(current_pos.pose.position.z - setpoint_H.pose.position.z) < 0.8))
 			{
 				velocity_control_enable = false;
+				att_control_enable = true;
 			}
 
-
-			if(ros::Time::now() - mission_last_time > ros::Duration(5))	/* hover for 5 seconds. -libn */
+			if(ros::Time::now() - mission_last_time > ros::Duration(20))	/* hover for 5 seconds. -libn */
 			{
 				
 				if(land_client.call(landing_cmd) && landing_cmd.response.success)
@@ -261,31 +389,33 @@ int main(int argc, char **argv)
 				}
 			}
 
-
+		    
 
 			if(velocity_control_enable)
 			{
 				local_vel_pub.publish(vel_pub);
-				ROS_INFO("current vel control");
-				mission_last_time = ros::Time::now();
 			}
-			else
+			if(pos_control_enable)
 			{
 				local_pos_pub.publish(pose_pub);
-				ROS_INFO("current pos control");
+			}
+			if(att_control_enable)
+			{
+				local_att_pub.publish(att_pub);
 			}
 
-
-			ros::spinOnce();
-			rate.sleep();
 		}
 		else{
-			if(current_state.mode == "MANUAL") ROS_INFO("MANUAL");
-			if(current_state.mode == "OFFBOARD") ROS_INFO("OFFBOARD");
-			if(current_state.mode == "AUTO.LAND") ROS_INFO("AUTO.LAND");
-			ros::spinOnce();
-			rate.sleep();
+			// if(current_state.mode == "MANUAL") ROS_INFO("MANUAL");
+			// if(current_state.mode == "OFFBOARD") ROS_INFO("OFFBOARD");
+			// if(current_state.mode == "AUTO.LAND") ROS_INFO("AUTO.LAND");
+			
 		}
+		// local_attitude_pub.publish(attitude_pub);
+		// local_thrust_pub.publish(thrust_pub);
+
+		ros::spinOnce();
+		rate.sleep();
 
     }
 
