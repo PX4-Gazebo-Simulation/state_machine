@@ -6,7 +6,7 @@ cd ${HOME}
 mkdir -p state_machine_ws/src
 cd ${HOME}/state_machine_ws/src
 catkin_init_workspace
-git clone https://github.com/bing0037/state_machine.git
+git clone https://github.com/PX4-Gazebo-Simulation/state_machine
 cd .. # to workspace directory
 catkin_make
 ```
@@ -19,18 +19,10 @@ roslaunch mavros px4.launch fcu_url:="udp://:14540@127.0.0.1:14557"
 ```
 run pixhawk&gazebo:
 ```
-cd ~/code/pixhawk/px4_vtol/	#your pixhawk directory
+cd ${HOME}/src/Firmware	#your pixhawk directory
 make posix_sitl_default gazebo
 ```
 run state_machine:
-```
-source ${HOME}/state_machine_ws/devel/setup.bash
-rosrun state_machine send4setpoint
-```
-```
-source ${HOME}/state_machine_ws/devel/setup.bash
-rosrun state_machine send10picture_position
-```
 ```
 source ${HOME}/state_machine_ws/devel/setup.bash
 rosrun state_machine offb_simulation_test
@@ -42,20 +34,18 @@ rosrun mavros mavsys mode -c OFFBOARD
 ```
 rosrun mavros mavsafety arm
 ```
+open keyboard input:
+```
+source ${HOME}/ros_keyboard_ws/devel/setup.bash
+rosrun keyboard keyboard
+```
+
 ## 2-2 real flight(connected to pixhawk)
 run pixhawk connection:
 ```
 roslaunch mavros px4.launch
 ```
 run state_machine:
-```
-source ${HOME}/state_machine_ws/devel/setup.bash
-rosrun state_machine send4setpoint
-```
-```
-source ${HOME}/state_machine_ws/devel/setup.bash
-rosrun state_machine send10picture_position
-```
 ```
 source ${HOME}/state_machine_ws/devel/setup.bash
 rosrun state_machine offb_simulation_test
