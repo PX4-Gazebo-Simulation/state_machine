@@ -1,3 +1,8 @@
+# Test for Pixhawk & Gazebo simulation in ROS(through MAVROS)
+
+# Video:
+https://www.youtube.com/watch?v=9zLjYLtHdPQ
+
 # state_machine
 
 # 1 How to make
