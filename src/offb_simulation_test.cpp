@@ -91,6 +91,14 @@ void board_pos_cb(const state_machine::DrawingBoard10::ConstPtr& msg)
 
 /* keyboard. -libn */
 state_machine::Key key;
+/*	keyboard:
+*	KEY_LEFT=276
+*	KEY_RIGHT=275
+*	KEY_DOWN=274
+*	KEY_UP=273
+*	KEY_w=119
+*	KEY_s=115
+*/
 void keyboard_cb(const state_machine::Key::ConstPtr& msg)
 {
 	key = *msg;
@@ -137,12 +145,12 @@ void keyboard_cb(const state_machine::Key::ConstPtr& msg)
 		theta -= 0.1f;
 	}
 	// thrust:
-	if(key.code == 119)
+	if(key.code == 119)				// keyboard: w
 	{
 		att_pub.thrust += 0.03f;
 		ROS_INFO("Thrust: %f",att_pub.thrust);
 	}
-	if(key.code == 115)
+	if(key.code == 115)				// keyboard: s
 	{
 		att_pub.thrust -= 0.03f;
 		ROS_INFO("Thrust: %f",att_pub.thrust);
