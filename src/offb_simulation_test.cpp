@@ -18,6 +18,9 @@
 #include <state_machine/Thrust.h>
 #include <state_machine/AttitudeTarget.h>
 
+#include <state_machine/Input_Game.h>
+#include <state_machine/Restart_Finished.h>
+#include <state_machine/AttControlRunning.h>
 #include <state_machine/Key.h>
 
 /* subscribe messages from pixhawk. -libn */
@@ -59,6 +62,13 @@ int current_mission_num;	/* mission num: 5 subtask -> 5 current nums.	TODO:chang
 ros::Time mission_timer_t;	/* timer to control the whole mission. -libn */
 ros::Time loop_timer_t;	/* timer to control subtask. -libn */
 
+bool Restart_env = false;								// message: DRL controller -> UAV through action!
+/* UAV restarting finished message: UAV -> DRL controller */
+state_machine::Restart_Finished restart_finished;		// message: UAV -> DRL controller
+// restart_finished.finished = false;
+state_machine::AttControlRunning att_running;		// message(UAV -> DRL controller): running att_control, ready for DRL memory()!
+
+
 state_machine::State current_state;
 state_machine::State last_state;
 state_machine::State last_state_display;
@@ -87,6 +97,17 @@ state_machine::DrawingBoard10 board10;
 void board_pos_cb(const state_machine::DrawingBoard10::ConstPtr& msg)
 {
 	board10 = *msg;
+}
+
+/* input of the game(environment): action */
+state_machine::Input_Game input_game;
+void input_game_cb(const state_machine::Input_Game::ConstPtr& msg)
+{
+	input_game = *msg;
+	// ROS_INFO("action: %f", input_game.action);
+	if (input_game.action > 100.0f)	{Restart_env=true;}
+	else {Restart_env=false;}
+
 }
 
 /* keyboard. -libn */
@@ -241,6 +262,18 @@ int main(int argc, char **argv)
 		            ("DrawingBoard_Position10", 10, board_pos_cb);
 	board10.drawingboard.resize(10);		/* MUST! -libn */
 
+
+    /* Action: game_input. -libn */
+	ros::Subscriber input_game_sub = nh.subscribe<state_machine::Input_Game>
+		("game_input", 10, input_game_cb);
+
+    /* UAV restart_finished_msg. -libn */
+    ros::Publisher restart_finished_pub = nh.advertise<state_machine::Restart_Finished>
+                ("/restart_finished_msg", 10);
+	/* UAV ATT control running. -libn */
+	ros::Publisher att_running_pub = nh.advertise<state_machine::AttControlRunning>
+				("/att_running_msg", 10);
+
 	ros::Subscriber keyboard_sub = nh.subscribe<state_machine::Key>
 		("keyboard/keydown", 10, keyboard_cb);
 
@@ -263,7 +296,7 @@ int main(int argc, char **argv)
 
 	setpoint_H.pose.position.x = 0.0f;	/* pose(x,y) is not used, just for safe. -libn */
 	setpoint_H.pose.position.y = 0.0f;
-	setpoint_H.pose.position.z = 5.0f;
+	setpoint_H.pose.position.z = 15.0f;
 
     //send a few setpoints before starting
     for(int i = 100; ros::ok() && i > 0; --i){
@@ -288,12 +321,13 @@ int main(int argc, char **argv)
 	bool velocity_control_enable = true;
 	bool pos_control_enable = false;
 	bool att_control_enable = false;
+	float error_height = 0.0f;
 
 
 	// velocity control:
 	vel_pub.twist.linear.x = 0.0f;
 	vel_pub.twist.linear.y = 0.0f;
-	vel_pub.twist.linear.z = 2.0f;
+	vel_pub.twist.linear.z = 1.0f;
 	vel_pub.twist.angular.x = 0.0f;
 	vel_pub.twist.angular.y = 0.0f;
 	vel_pub.twist.angular.z = 0.0f;
@@ -301,7 +335,7 @@ int main(int argc, char **argv)
 	// position control:
 	pose_pub.pose.position.x = 5;
 	pose_pub.pose.position.y = 5;
-	pose_pub.pose.position.z = 2;
+	pose_pub.pose.position.z = 5;
 
 	// attitude control:
 	att_pub.thrust = 0.56f;
@@ -309,6 +343,8 @@ int main(int argc, char **argv)
 	att_pub.orientation.y = y_axis*sinf(theta/2);			/* w = cos(theta/2), x = nx * sin(theta/2),  y = ny * sin(theta/2), z = nz * sin(theta/2) -libn */
 	att_pub.orientation.z = z_axis*sinf(theta/2);
 	att_pub.orientation.w = cosf(theta/2);		/* set yaw* = 90 degree(default in simulation). -libn */
+
+	att_running.running = false;	// message(UAV -> DRL controller): running att_control, ready for DRL memory()!
 
     while(ros::ok()){
     	/* mode switch display(Once). -libn */
@@ -328,8 +364,7 @@ int main(int argc, char **argv)
     		ROS_INFO("switch to mode: OFFBOARD");
     	}
     	if(current_state.armed && !last_state.armed)
-    	 		{
-
+		{
     		last_state.armed = current_state.armed;
     		ROS_INFO("UAV armed!");
     	}
@@ -371,46 +406,115 @@ int main(int argc, char **argv)
 
 
 
-
+		// att_running.running = true;			// start DRL Memory::observe()!
+		att_running_pub.publish(att_running);
+		// restart_finished.finished = true;	// send to DRL controller!	//Not used!
+		restart_finished_pub.publish(restart_finished);
 
 
 		// if(current_state.mode == "OFFBOARD" && current_state.armed)	/* set message display delay(0.5s). -libn */
 		if(current_state.mode == "OFFBOARD" && current_state.armed)	/* set message display delay(0.5s). -libn */
 		{
-
-			
-			if(velocity_control_enable &&
-			   (abs(current_pos.pose.position.x - current_pos.pose.position.x) < 0.2) &&      // switch to next state
-			   (abs(current_pos.pose.position.y - current_pos.pose.position.y) < 0.2) &&
-			   (abs(current_pos.pose.position.z - setpoint_H.pose.position.z) < 0.8))
-			{
-				velocity_control_enable = false;
-				att_control_enable = true;
-			}
-
-			if(ros::Time::now() - mission_last_time > ros::Duration(20))	/* hover for 5 seconds. -libn */
-			{
-				
-				if(land_client.call(landing_cmd) && landing_cmd.response.success)
-				{
-					ROS_INFO("AUTO LANDING!");
-				}
-			}
-
-		    
-
+			ROS_INFO("Current height: %f", current_pos.pose.position.z);
 			if(velocity_control_enable)
 			{
 				local_vel_pub.publish(vel_pub);
+				ROS_INFO("velocity_control_enable: %d", velocity_control_enable);
+				att_running.running = false;			// stop DRL Memory::observe()!
+				restart_finished.finished = false;	// send to DRL controller!
+			
+				if(velocity_control_enable &&
+				(abs(current_pos.pose.position.x - current_pos.pose.position.x) < 0.2) &&      // switch to next state
+				(abs(current_pos.pose.position.y - current_pos.pose.position.y) < 0.2) &&
+				(abs(current_pos.pose.position.z - setpoint_H.pose.position.z) < 0.8))
+				{				
+					att_control_enable = true;
+					input_game.action = 0.56f;
+					pos_control_enable = false;
+					velocity_control_enable = false;
+				}
+
 			}
-			if(pos_control_enable)
-			{
-				local_pos_pub.publish(pose_pub);
-			}
+		
+
+
 			if(att_control_enable)
 			{
+				ROS_INFO("att_control_enable: %d", att_control_enable);
+				ROS_INFO("current action: %f", input_game.action);
+				if(input_game.action == 1.0)	{att_pub.thrust += 0.03f;}
+				if(input_game.action == 0.0)	{att_pub.thrust -= 0.03f;}
+				ROS_INFO("Thrust: %f", att_pub.thrust);
 				local_att_pub.publish(att_pub);
+				att_running.running = true;			// start DRL Memory::observe()!
+				restart_finished.finished = true;	// send to DRL controller!
+				// att_running_pub.publish(att_running);
+
+				if(Restart_env == true)							// switch to next state
+				{
+
+					pos_control_enable = true;
+					velocity_control_enable = false;
+					att_control_enable = false;
+
+					att_running.running = false;			// stop DRL Memory::observe()!
+					restart_finished.finished = false;	// send to DRL controller!
+					
+					// att_running_pub.publish(att_running);
+				}
 			}
+
+			if(pos_control_enable)
+			{	
+				pose_pub.pose.position.x = current_pos.pose.position.x;
+				pose_pub.pose.position.y = current_pos.pose.position.y;
+				pose_pub.pose.position.z = 15.0f;
+
+				att_running.running = false;			// stop DRL Memory::observe()!
+				restart_finished.finished = false;	// send to DRL controller!
+
+
+				local_pos_pub.publish(pose_pub);
+				ROS_INFO("pos_control_enable: %d", pos_control_enable);
+				error_height = fabs(current_pos.pose.position.z - pose_pub.pose.position.z);
+				ROS_INFO("current_height: %f, desired_height: %f, error: %f", current_pos.pose.position.z, pose_pub.pose.position.z, error_height);
+				ROS_INFO("if judgement: %d", (abs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1));
+				
+
+				restart_finished.finished = false;
+
+				if(fabs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1)			// switch to next state
+				{
+					ROS_INFO("Switching: pos_control -> att_control!");
+					att_control_enable = true;
+					velocity_control_enable = false;
+					pos_control_enable = false;			
+
+					/* restart training from the intial env status */					
+					att_pub.thrust = 0.56f;
+
+					// restart_finished.finished = true;	// send to DRL controller!
+					// restart_finished_pub.publish(restart_finished);
+				}
+
+			}
+
+
+
+
+			// if(ros::Time::now() - mission_last_time > ros::Duration(40))	/* hover for 5 seconds. -libn */
+			// {
+				
+			// 	if(land_client.call(landing_cmd) && landing_cmd.response.success)
+			// 	{
+			// 		ROS_INFO("AUTO LANDING!");
+			// 	}
+			// }
+			
+		    
+
+
+
 
 		}
 		else{

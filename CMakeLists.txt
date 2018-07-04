@@ -22,7 +22,9 @@ add_message_files(
   ActuatorControl.msg
   Thrust.msg
   AttitudeTarget.msg
-
+  Input_Game.msg
+  Restart_Finished.msg
+  AttControlRunning.msg
   Key.msg
 
 )
