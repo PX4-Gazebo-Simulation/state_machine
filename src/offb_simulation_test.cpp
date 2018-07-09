@@ -110,6 +110,15 @@ void input_game_cb(const state_machine::Input_Game::ConstPtr& msg)
 
 }
 
+/* input of the game(environment): action */
+geometry_msgs::TwistStamped local_vel;
+void local_vel_cb(const geometry_msgs::TwistStamped::ConstPtr& msg)
+{
+	local_vel = *msg;
+	ROS_INFO("vel_z: %f", local_vel.twist.linear.z);
+	
+}
+
 /* keyboard. -libn */
 state_machine::Key key;
 /*	keyboard:
@@ -241,7 +250,6 @@ int main(int argc, char **argv)
     ros::Publisher local_att_pub = nh.advertise<state_machine::AttitudeTarget>
                 ("/mavros/setpoint_raw/attitude", 10);											
 
-
     ros::ServiceClient arming_client = nh.serviceClient<state_machine::CommandBool>
             ("mavros/cmd/arming");
     // ros::ServiceClient set_mode_client = nh.serviceClient<state_machine::SetMode>
@@ -273,6 +281,10 @@ int main(int argc, char **argv)
 	/* UAV ATT control running. -libn */
 	ros::Publisher att_running_pub = nh.advertise<state_machine::AttControlRunning>
 				("/att_running_msg", 10);
+
+    /* UAV velocity. -libn */
+	ros::Subscriber local_vel_sub = nh.subscribe<geometry_msgs::TwistStamped>
+		("/mavros/local_position/velocity", 10, local_vel_cb);			
 
 	ros::Subscriber keyboard_sub = nh.subscribe<state_machine::Key>
 		("keyboard/keydown", 10, keyboard_cb);
@@ -442,10 +454,32 @@ int main(int argc, char **argv)
 			{
 				ROS_INFO("att_control_enable: %d", att_control_enable);
 				ROS_INFO("current action: %f", input_game.action);
-				if(input_game.action == 1.0)	{att_pub.thrust += 0.03f;}
-				if(input_game.action == 0.0)	{att_pub.thrust -= 0.03f;}
+				// if(input_game.action == 1.0)	{att_pub.thrust += 0.03f;}
+				// if(input_game.action == 0.0)	{att_pub.thrust -= 0.03f;}
+
+				/* Limit: 2) vertical velocity limit:[-3,3]. */
+				/* discard negtive input when vel.z is large than 3m/s downward; positive input when upward. */
+				if(local_vel.twist.linear.z > -3.0)		/* large vertical velocity downward! */
+				{
+					if(input_game.action == 0.0)	{att_pub.thrust -= 0.03f;}
+					
+				}
+				else ROS_INFO("Positive input is discarded.");
+				if(local_vel.twist.linear.z < 3.0)		/* large vertical velocity downward! */
+				{
+					if(input_game.action == 1.0)	{att_pub.thrust += 0.03f;}
+					
+				}
+				else ROS_INFO("Negtive input is discarded.");
+
+				/* Limit: 1) thrust limit:[0.25,0.78]. */
+				if(att_pub.thrust > 0.78)	{att_pub.thrust = 0.78;ROS_INFO("Thrust limit meets");}
+				if(att_pub.thrust < 0.40)	{att_pub.thrust = 0.40;ROS_INFO("Thrust limit meets");}
+
+				att_pub.thrust = 0.56;
 				ROS_INFO("Thrust: %f", att_pub.thrust);
 				local_att_pub.publish(att_pub);
+
 				att_running.running = true;			// start DRL Memory::observe()!
 				restart_finished.finished = true;	// send to DRL controller!
 				// att_running_pub.publish(att_running);
@@ -464,38 +498,54 @@ int main(int argc, char **argv)
 				}
 			}
 
-			if(pos_control_enable)
+			if(pos_control_enable)		/* we need to recovery now! */
 			{	
-				pose_pub.pose.position.x = current_pos.pose.position.x;
-				pose_pub.pose.position.y = current_pos.pose.position.y;
-				pose_pub.pose.position.z = 15.0f;
-
-				att_running.running = false;			// stop DRL Memory::observe()!
-				restart_finished.finished = false;	// send to DRL controller!
-
-
-				local_pos_pub.publish(pose_pub);
-				ROS_INFO("pos_control_enable: %d", pos_control_enable);
-				error_height = fabs(current_pos.pose.position.z - pose_pub.pose.position.z);
-				ROS_INFO("current_height: %f, desired_height: %f, error: %f", current_pos.pose.position.z, pose_pub.pose.position.z, error_height);
-				ROS_INFO("if judgement: %d", (abs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1));
+				/* How to recovery:
+				 * 1) velocity recovery if current velocity is too harsh
+				 * 2) position recovery to get desired pos.
+				 */
 				
-
-				restart_finished.finished = false;
-
-				if(fabs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1)			// switch to next state
+				if((local_vel.twist.linear.z > 3.0) || (local_vel.twist.linear.z < -3.0))
 				{
-					ROS_INFO("Switching: pos_control -> att_control!");
-					att_control_enable = true;
-					velocity_control_enable = false;
-					pos_control_enable = false;			
-
-					/* restart training from the intial env status */					
-					att_pub.thrust = 0.56f;
-
-					// restart_finished.finished = true;	// send to DRL controller!
-					// restart_finished_pub.publish(restart_finished);
+					local_vel_pub.publish(vel_pub);
+					ROS_INFO("Emergency! Vel recovery!");
 				}
+				else
+				{
+					pose_pub.pose.position.x = setpoint_H.pose.position.x;
+					pose_pub.pose.position.y = setpoint_H.pose.position.y;
+					pose_pub.pose.position.z = 15.0f;
+
+					att_running.running = false;			// stop DRL Memory::observe()!
+					restart_finished.finished = false;	// send to DRL controller!
+
+
+					local_pos_pub.publish(pose_pub);
+					ROS_INFO("pos_control_enable: %d", pos_control_enable);
+					error_height = fabs(current_pos.pose.position.z - pose_pub.pose.position.z);
+					ROS_INFO("current_height: %f, desired_height: %f, error: %f", current_pos.pose.position.z, pose_pub.pose.position.z, error_height);
+					ROS_INFO("if judgement: %d", (abs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1));
+					
+
+					restart_finished.finished = false;
+
+					if(fabs(current_pos.pose.position.z - pose_pub.pose.position.z) < 0.1)			// switch to next state
+					{
+						ROS_INFO("Switching: pos_control -> att_control!");
+						att_control_enable = true;
+						velocity_control_enable = false;
+						pos_control_enable = false;			
+
+						/* restart training from the intial env status */					
+						att_pub.thrust = 0.56f;
+
+						// restart_finished.finished = true;	// send to DRL controller!
+						// restart_finished_pub.publish(restart_finished);
+					}
+
+				}
+
+
 
 			}
 
