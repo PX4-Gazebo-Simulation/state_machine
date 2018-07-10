@@ -105,7 +105,7 @@ void input_game_cb(const state_machine::Input_Game::ConstPtr& msg)
 {
 	input_game = *msg;
 	// ROS_INFO("action: %f", input_game.action);
-	if (input_game.action > 100.0f)	{Restart_env=true;}
+	if (input_game.action < 0.0f)	{Restart_env=true;}
 	else {Restart_env=false;}
 
 }
@@ -308,7 +308,7 @@ int main(int argc, char **argv)
 
 	setpoint_H.pose.position.x = 0.0f;	/* pose(x,y) is not used, just for safe. -libn */
 	setpoint_H.pose.position.y = 0.0f;
-	setpoint_H.pose.position.z = 15.0f;
+	setpoint_H.pose.position.z = 20.0f;
 
     //send a few setpoints before starting
     for(int i = 100; ros::ok() && i > 0; --i){
@@ -476,7 +476,6 @@ int main(int argc, char **argv)
 				if(att_pub.thrust > 0.78)	{att_pub.thrust = 0.78;ROS_INFO("Thrust limit meets");}
 				if(att_pub.thrust < 0.40)	{att_pub.thrust = 0.40;ROS_INFO("Thrust limit meets");}
 
-				att_pub.thrust = 0.56;
 				ROS_INFO("Thrust: %f", att_pub.thrust);
 				local_att_pub.publish(att_pub);
 
@@ -514,7 +513,7 @@ int main(int argc, char **argv)
 				{
 					pose_pub.pose.position.x = setpoint_H.pose.position.x;
 					pose_pub.pose.position.y = setpoint_H.pose.position.y;
-					pose_pub.pose.position.z = 15.0f;
+					pose_pub.pose.position.z = 20.0f;
 
 					att_running.running = false;			// stop DRL Memory::observe()!
 					restart_finished.finished = false;	// send to DRL controller!
